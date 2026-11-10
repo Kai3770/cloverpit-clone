@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+# Spielerkonten (Namen, Passwort-Hashes, Statistiken) nicht ins Repo
+spielstand.json
+spielstand.json.defekt
+.spielstand-*.tmp

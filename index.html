@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0614">
+  <title>Glücksgrube</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23150a2e'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle'%3E%F0%9F%8D%80%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="stars" aria-hidden="true"></div>
+  <div id="app">
+    <header id="topbar" class="topbar" hidden>
+      <button id="brand" class="brand" type="button" aria-label="Zum Hauptmenü"><span class="brand-clover">🍀</span><span class="brand-name">GLÜCKSGRUBE</span></button>
+      <div class="topbar-right">
+        <button id="btn-sound" class="icon-btn" type="button" title="Ton an/aus">🔊</button>
+        <button id="btn-help" class="icon-btn" type="button" title="Regeln &amp; Auszahlung">❓</button>
+        <div id="chip" class="chip" hidden></div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="view-auth" class="view" hidden>
+        <div class="hero">
+          <div class="hero-reels" aria-hidden="true"><span>🍒</span><span>🍀</span><span>7️⃣</span><span>💎</span><span>💀</span></div>
+          <h1 class="logo">GLÜCKSGRUBE</h1>
+          <p class="hero-sub">Dreh den Automaten. Zahl den Eintreiber. Sabotiere deine Freunde.</p>
+        </div>
+        <div class="panel auth">
+          <div class="tabs">
+            <button id="tab-login" class="tab active" type="button">Anmelden</button>
+            <button id="tab-register" class="tab" type="button">Spieler anlegen</button>
+          </div>
+          <form id="auth-form" autocomplete="on">
+            <label class="field"><span>Spielername</span><input id="auth-name" name="username" type="text" maxlength="16" autocomplete="username" required></label>
+            <label class="field"><span>PIN / Passwort</span><input id="auth-pin" name="password" type="password" maxlength="64" autocomplete="current-password" required></label>
+            <p id="auth-hint" class="muted small"></p>
+            <button id="auth-submit" class="btn btn-pink btn-block" type="submit">Anmelden</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="view-menu" class="view" hidden></section>
+      <section id="view-room" class="view" hidden></section>
+      <section id="view-game" class="view game" hidden></section>
+    </main>
+
+    <div id="overlay" class="overlay" hidden></div>
+    <div id="modal-root"></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <canvas id="fx"></canvas>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
