@@ -92,9 +92,12 @@ def test_debt_grows_and_shark_discounts():
 def test_every_charm_has_valid_fx():
     for cid, c in G.CHARMS.items():
         for key in c["fx"]:
-            assert key in {"mult", "weight", "line", "spins", "holds", "gambles", "flat", "interest", "skull_pen",
-                           "debt", "streak", "gamble_odds", "pot", "lives"}, (cid, key)
-    G.compute_mods({cid: 1 for cid in G.CHARMS})
+            assert key in {"mult", "weight", "lenmult", "lives"} | set(G.MUL_KEYS) | set(G.ADD_KEYS), (cid, key)
+        assert c["rarity"] in G.RARITY_ORDER
+    for eid, e in G.EVENTS.items():
+        for key in e["fx"]:
+            assert key in {"mult", "weight", "lenmult"} | set(G.MUL_KEYS) | set(G.ADD_KEYS), (eid, key)
+    G.compute_mods({cid: c["max"] for cid, c in G.CHARMS.items()}, [e["fx"] for e in G.EVENTS.values()])
 
 
 def test_base_ev_is_sane():
@@ -485,3 +488,268 @@ def test_index_and_static_served(client):
     assert client.get("/").status_code == 200
     assert client.get("/static/app.js").status_code == 200
     assert client.get("/static/style.css").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Erweiterung: Skalierung, Verkaufen, Ereignisse, neue Items
+# --------------------------------------------------------------------------- #
+
+def test_prices_scale_with_round_and_stacks():
+    lobby, a, b = shop_lobby()
+    a.offers = ["clover"]
+    p1 = lobby.charm_price(a, "clover")
+    s1 = lobby.sabo_price(a, "thief")
+    r1 = lobby.reroll_cost(a)
+    lobby.round = 8
+    p8 = lobby.charm_price(a, "clover")
+    assert p8 == round(G.CHARMS["clover"]["price"] * G.PRICE_GROWTH ** 7)
+    assert p8 > p1 * 2 and lobby.sabo_price(a, "thief") > s1 * 2 and lobby.reroll_cost(a) > r1 * 2
+    a.charms["clover"] = 2
+    assert lobby.charm_price(a, "clover") > p8 * 1.8           # Stapel kosten extra
+    a.charms["coupon"] = 1
+    assert lobby.charm_price(a, "clover") < round(G.CHARMS["clover"]["price"] * 1.9 * G.PRICE_GROWTH ** 7)
+
+
+def test_buy_sabotage_uses_scaled_price():
+    lobby, a, b = shop_lobby()
+    lobby.round = 6
+    a.coins = 1000
+    price = lobby.sabo_price(a, "curse")
+    lobby.buy_sabotage(a, "curse", "ben")
+    assert a.coins == 1000 - price and price > G.SABOTAGE["curse"]["price"]
+
+
+def test_rarity_weights_and_legendary_gate():
+    assert G.rarity_weights(0)["legendary"] == 0 and G.rarity_weights(G.LEGENDARY_FROM - 1)["legendary"] == 0
+    assert G.rarity_weights(G.LEGENDARY_FROM)["legendary"] > 0
+    assert G.rarity_weights(12)["epic"] > G.rarity_weights(2)["epic"]
+    lobby, a, b = shop_lobby()
+    lobby.round = 1
+    for _ in range(60):
+        assert all(G.CHARMS[c]["rarity"] != "legendary" for c in lobby.gen_offers(a, 5))
+    lobby.round = 10
+    seen = set()
+    for _ in range(200):
+        seen.update(G.CHARMS[c]["rarity"] for c in lobby.gen_offers(a, 5))
+    assert "legendary" in seen
+    lobby.round = G.EXTRA_OFFER_FROM
+    assert lobby.offer_count() == 5
+
+
+def test_starter_never_offers_legendary():
+    for seed in range(40):
+        G.RNG = random.Random(seed)
+        lobby = make_lobby("Ann", "Ben")
+        lobby.start_game()
+        for p in lobby.players.values():
+            assert len(p.offers) == 3 and all(G.CHARMS[c]["rarity"] != "legendary" for c in p.offers)
+        G.LOBBIES.clear()
+
+
+def test_sell_charm():
+    lobby, a, b = shop_lobby()
+    a.charms = {"clover": 2, "angel": 1}
+    lobby.round = 5
+    val = lobby.sell_value(a, "clover")
+    assert val == int(G.CHARMS["clover"]["price"] * (1 + G.STACK_GROWTH) * G.PRICE_GROWTH ** 4 * G.SELL_RATE)
+    before = a.coins
+    assert lobby.sell_charm(a, "clover") == val
+    assert a.coins == before + val and a.charms["clover"] == 1
+    lobby.sell_charm(a, "clover")
+    assert "clover" not in a.charms
+    with pytest.raises(G.GameError):
+        lobby.sell_charm(a, "clover")
+    with pytest.raises(G.GameError):
+        lobby.sell_charm(a, "angel")                       # Schutzengel ist unverkäuflich
+    assert lobby.sell_value(a, "angel") == 0
+    # Kauf + sofortiger Verkauf darf nie Gewinn bringen
+    a.charms = {}
+    a.coins = 10000
+    for cid in G.CHARMS:
+        a.offers = [cid]
+        price = lobby.charm_price(a, cid)
+        if G.CHARMS[cid]["fx"].get("lives"):
+            continue
+        lobby.buy_charm(a, cid)
+        assert lobby.sell_value(a, cid) < price
+        lobby.sell_charm(a, cid)
+
+
+def test_sell_only_in_shop():
+    lobby = make_lobby("Ann", "Ben")
+    to_spin(lobby)
+    a = lobby.players["ann"]
+    cid = next(iter(a.charms))
+    with pytest.raises(G.GameError):
+        lobby.sell_charm(a, cid)
+
+
+def test_events_announced_and_applied():
+    lobby = make_lobby("Ann", "Ben", rounds=10)
+    to_spin(lobby)
+    G.RNG = random.Random(3)
+    rounds_with_event = []
+    for _ in range(9):
+        for p in lobby.players.values():
+            p.coins = 10 ** 7
+            while p.spins_left > 0:
+                lobby.spin(p)
+        lobby.end_spin_phase()
+        lobby.after_collect()
+        if lobby.phase != "shop":
+            break
+        upcoming = lobby.round + 1
+        assert (lobby.next_event is not None) == (upcoming % G.EVENT_EVERY == 0)
+        announced = lobby.next_event
+        view = G.lobby_view(lobby, "ann")
+        assert (view["next_event"] or {}).get("id") == announced
+        lobby.end_shop()
+        assert lobby.event == announced and lobby.next_event is None
+        if announced:
+            rounds_with_event.append(lobby.round)
+            assert G.lobby_view(lobby, "ann")["event"]["id"] == announced
+    assert rounds_with_event == [3, 6, 9]
+
+
+def test_event_effects_on_spins_and_debt():
+    lobby = make_lobby("Ann", rounds=6)
+    to_spin(lobby)
+    a = lobby.players["ann"]
+    a.charms = {}
+    lobby.event = "mercy"
+    m = lobby.mods_of(a)
+    assert lobby.due_of(a, 4, m) < G.debt_for(4, G.compute_mods({}))
+    lobby.event = "bonus"
+    assert lobby.mods_of(a)["spins"] == 2
+    lobby.event = "drought"
+    assert lobby.mods_of(a)["spins"] == -1
+
+
+def test_tax_chain_bribe():
+    lobby, a, b = shop_lobby()
+    a.coins = b.coins = 5000
+    lobby.buy_sabotage(a, "tax", "ben")
+    lobby.buy_sabotage(a, "chain", "ben")
+    lobby.buy_sabotage(b, "bribe", "")
+    assert b.tax_next == 1 and b.chain_next and b.bribe_next == 1
+    lobby.buy_sabotage(b, "bribe", "")
+    with pytest.raises(G.GameError):
+        lobby.buy_sabotage(b, "bribe", "")                 # max 2 Bestechungen
+    for p in lobby.players.values():
+        p.ready = True
+    lobby.tick(time.time())
+    assert lobby.phase == "spin" and b.chained and b.holds_left == 0 and b.taxed == 1 and b.bribed == 2
+    with pytest.raises(G.GameError):
+        lobby.spin(b, [0])
+    base = G.debt_for(lobby.round, lobby.mods_of(b))
+    assert lobby.due_of(b, lobby.round, lobby.mods_of(b), b.taxed, b.bribed) == max(1, -(-base * 1.2 * 0.75 ** 2 // 1))
+    for p in lobby.players.values():
+        while p.spins_left > 0:
+            lobby.spin(p)
+    b.coins = 10 ** 6
+    lobby.end_spin_phase()
+    row = next(r for r in lobby.result["rows"] if r["key"] == "ben")
+    assert row["due"] == lobby.due_of(b, lobby.round, lobby.mods_of(b), 1, 2)
+
+
+def test_thief_scales_and_vault_guards():
+    lobby, a, b = shop_lobby()
+    lobby.round = 6
+    a.coins, b.coins = 1000, 200
+    lobby.apply_sabotage("thief", a, b)
+    full = int(15 * G.price_scale(6) + 200 * 0.15)
+    assert b.coins == 200 - full
+    b.coins = 200
+    b.charms["vault"] = 1
+    lobby.apply_sabotage("thief", a, b)
+    assert b.coins == 200 - int(full * 0.5)
+
+
+def test_new_effects_in_evaluate():
+    grid = [["cherry"] * 3 + ["lemon", "bell"], ["lemon", "bell", "clover", "diamond", "cherry"],
+            ["bell", "clover", "diamond", "cherry", "lemon"]]
+    base = G.evaluate(grid, G.compute_mods({}))["win"]
+    assert G.evaluate(grid, G.compute_mods({"fishes": 1}))["win"] == round(base * 1.4)
+    assert G.evaluate(grid, G.compute_mods({}), boost=2.0)["win"] == base * 2
+    skulls = [["skull"] * 3 + ["lemon", "bell"], ["lemon", "bell", "clover", "diamond", "cherry"],
+              ["bell", "clover", "diamond", "cherry", "lemon"]]
+    r = G.evaluate(skulls, G.compute_mods({}))
+    assert r["pen"] == G.SKULL_PEN[3] and r["win"] == 0
+    r = G.evaluate(skulls, G.compute_mods({"grave": 1}))
+    assert r["pen"] == 0 and r["win"] == G.SKULL_PEN[3] * 2 and r["lines"][0]["coins"] > 0
+
+
+def test_first_last_boost_and_consolation():
+    lobby = make_lobby("Ann", rounds=6)
+    to_spin(lobby)
+    a = lobby.players["ann"]
+    a.charms = {"early": 1, "finale": 1, "coin": 1}
+    a.spins_left, a.spin_no = 3, 0
+    boosts = []
+    for _ in range(3):
+        last = lobby.spin(a)
+        boosts.append(last["boost"])
+        if last["win"] == 0:
+            assert last["flat"] == 5
+    assert boosts == [2.0, 1.0, 2.5]
+
+
+def test_cat_can_save_a_life():
+    lobby = make_lobby("Ann", rounds=6)
+    to_spin(lobby)
+    a = lobby.players["ann"]
+    a.charms = {"cat": 2}
+    for p in lobby.players.values():
+        while p.spins_left > 0:
+            lobby.spin(p)
+
+    class Lucky:
+        def random(self):
+            return 0.0
+    old = G.RNG
+    G.RNG = Lucky()
+    a.coins = 0
+    lives = a.lives
+    lobby.end_spin_phase()
+    G.RNG = old
+    assert a.lives == lives and a.saves == 1 and lobby.result["rows"][0]["saved"]
+
+
+def test_pot_scales():
+    lobby = make_lobby("Ann", rounds=10)
+    to_spin(lobby)
+    lobby.round = 7
+    a = lobby.players["ann"]
+    before = lobby.pot
+    G.RNG = random.Random(1)
+    last = lobby.spin(a)
+    if not last["jackpot"]:
+        assert lobby.pot - before == round(G.POT_PER_SPIN * G.price_scale(7))
+
+
+def test_http_sell_and_catalog(client):
+    tok = client.post("/api/register", json={"name": "Seller", "pin": "1234"}).get_json()["token"]
+    h = {"X-Token": tok}
+    cat = client.get("/api/catalog").get_json()
+    assert len(cat["charms"]) >= 30 and len(cat["sabotage"]) == 7 and len(cat["events"]) >= 6
+    assert "legendary" in cat["rarities"]
+    code = client.post("/api/lobby/create", json={"rounds": 6}, headers=h).get_json()["code"]
+    lobby = G.LOBBIES[code]
+    lobby.start_game()
+    p = lobby.players["seller"]
+    lobby.buy_charm(p, p.offers[0])
+    lobby.end_shop()
+    for _ in range(2):
+        while p.spins_left > 0:
+            lobby.spin(p)
+        p.coins = 10 ** 5
+        lobby.end_spin_phase()
+        lobby.after_collect()
+    assert lobby.phase == "shop"
+    st = client.get("/api/lobby/%s/state" % code, headers=h).get_json()
+    cid = next(iter(st["me"]["charms"]))
+    val = st["me"]["sell_values"][cid]
+    r = client.post("/api/lobby/%s/sell" % code, json={"id": cid}, headers=h)
+    assert r.status_code == 200 and r.get_json()["me"]["coins"] == st["me"]["coins"] + val
+    assert "price_scale" in st and set(st["me"]["sabo_prices"]) == set(G.SABOTAGE)
+    assert client.post("/api/lobby/%s/sell" % code, json={"id": "bogus"}, headers=h).status_code == 400

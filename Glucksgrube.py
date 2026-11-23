@@ -73,6 +73,15 @@ ABSENT_SECONDS = 150
 ROUND_CHOICES = (6, 10, 15)
 EMOTES = ("😂", "😱", "👏", "💀", "🤑", "😈", "🍀", "🔥")
 MAX_SABOTAGES = 3
+PRICE_GROWTH = 1.18         # Preise steigen pro Runde um 18 % (Glücksbringer, Sabotage, Mischen)
+STACK_GROWTH = 0.45         # jede weitere Kopie desselben Glücksbringers +45 %
+SELL_RATE = 0.4             # Verkaufen bringt 40 % des aktuellen Preises
+REROLL_BASE = 6
+LEGENDARY_FROM = 4          # legendäre Glücksbringer erscheinen ab dem Shop nach Runde 4
+EXTRA_OFFER_FROM = 6        # ab Runde 6 gibt es 5 statt 4 Angebote
+EVENT_EVERY = 3             # jede 3. Runde ist eine Ereignis-Runde
+INTEREST_CAP = 60
+SAVE_CAP = 0.6
 
 LINE_MULT = {3: 1, 4: 3, 5: 10}
 SKULL_PEN = {3: 10, 4: 30, 5: 75}
@@ -99,12 +108,16 @@ LINES = [
 
 # Glücksbringer: fx wird pro Stapel angewendet.
 #   mult{sym}   Auszahlung ×x^n        weight{sym}  Gewicht +x*n
-#   line ×x^n   alle Linien            spins/holds/gambles +x*n
+#   line ×x^n   alle Gewinne           spins/holds/gambles +x*n
 #   flat +x*n   Münzen pro Dreh        interest +x*n Zinsen auf Restmünzen
 #   skull_pen ×x^n   Pech-Strafen      debt ×x^n    Schulden
 #   streak +x*n Bonus je Gewinn-Serie  gamble_odds +x*n   pot ×x^n  Jackpot
-#   lives +x*n  sofort beim Kauf
+#   lives +x*n  sofort beim Kauf       lenmult{3|4|5} ×x^n  Linien dieser Länge
+#   consolation +x*n  Münzen bei Drehs ohne Gewinn      first/last ×x^n  erster/letzter Dreh
+#   discount ×x^n  Shop-Preise         guard ×x^n   Diebstahl     interest_cap +x*n
+#   save +x*n  Chance, beim Eintreiber kein Leben zu verlieren    skull_pay +x*n  Pechlinien zahlen
 CHARMS = OrderedDict([
+    # ---- Gewöhnlich
     ("clover", dict(emoji="🍀", name="Kleeblatt-Amulett", rarity="common", price=16, max=4,
                     desc="Kleeblätter zahlen ×1,5 und erscheinen öfter.",
                     fx=dict(mult={"clover": 1.5}, weight={"clover": 4}))),
@@ -117,6 +130,37 @@ CHARMS = OrderedDict([
     ("bell", dict(emoji="🔔", name="Goldglocke", rarity="common", price=19, max=4,
                   desc="Glocken zahlen ×2 und erscheinen öfter.",
                   fx=dict(mult={"bell": 2.0}, weight={"bell": 3}))),
+    ("pouch", dict(emoji="👛", name="Münzbeutel", rarity="common", price=16, max=4,
+                   desc="+4 Münzen bei jedem Dreh – egal ob Gewinn oder nicht.",
+                   fx=dict(flat=4))),
+    ("ward", dict(emoji="🧿", name="Pechbann", rarity="common", price=19, max=3,
+                  desc="Weniger 💀 und 30 % weniger Strafe bei Pechlinien.",
+                  fx=dict(weight={"skull": -3}, skull_pen=0.7))),
+    ("grip", dict(emoji="✋", name="Haltegriff", rarity="common", price=19, max=3,
+                  desc="+1 Walze halten pro Runde.",
+                  fx=dict(holds=1))),
+    ("dice", dict(emoji="🎲", name="Falschspieler", rarity="common", price=21, max=3,
+                  desc="+1 Risiko-Versuch pro Runde und bessere Chancen (+5 %).",
+                  fx=dict(gambles=1, gamble_odds=0.05))),
+    ("fishes", dict(emoji="🐟", name="Kleine Fische", rarity="common", price=15, max=4,
+                    desc="Alle 3er-Linien zahlen ×1,4.",
+                    fx=dict(lenmult={3: 1.4}))),
+    ("salad", dict(emoji="🥗", name="Obstsalat", rarity="common", price=15, max=3,
+                   desc="🍒 und 🍋 zahlen ×1,4 und erscheinen etwas öfter.",
+                   fx=dict(mult={"cherry": 1.4, "lemon": 1.4}, weight={"cherry": 2, "lemon": 2}))),
+    ("cookie", dict(emoji="🥠", name="Glückskeks", rarity="common", price=17, max=3,
+                    desc="+1 Walze halten und +1 Risiko-Versuch pro Runde.",
+                    fx=dict(holds=1, gambles=1))),
+    ("coin", dict(emoji="🪙", name="Trostmünze", rarity="common", price=14, max=4,
+                  desc="+5 Münzen bei jedem Dreh ohne Linien-Gewinn.",
+                  fx=dict(consolation=5))),
+    ("coupon", dict(emoji="🏷️", name="Rabattmarke", rarity="common", price=18, max=3,
+                    desc="Alle Shop-Preise −12 % (auch Sabotage und Mischen).",
+                    fx=dict(discount=0.88))),
+    ("vault", dict(emoji="🔐", name="Tresor", rarity="common", price=16, max=3,
+                   desc="Diebe erbeuten 50 % weniger, Zins-Obergrenze +40.",
+                   fx=dict(guard=0.5, interest_cap=40))),
+    # ---- Selten
     ("diamond", dict(emoji="💎", name="Diamantschleifer", rarity="rare", price=24, max=3,
                      desc="Diamanten zahlen ×1,6 und erscheinen öfter.",
                      fx=dict(mult={"diamond": 1.6}, weight={"diamond": 3}))),
@@ -126,51 +170,96 @@ CHARMS = OrderedDict([
     ("spin", dict(emoji="🎟️", name="Extra-Hebel", rarity="rare", price=34, max=3,
                   desc="+1 Dreh pro Runde.",
                   fx=dict(spins=1))),
-    ("pouch", dict(emoji="👛", name="Münzbeutel", rarity="common", price=16, max=4,
-                   desc="+4 Münzen bei jedem Dreh – egal ob Gewinn oder nicht.",
-                   fx=dict(flat=4))),
     ("piggy", dict(emoji="🐷", name="Sparschwein", rarity="rare", price=21, max=3,
-                   desc="+15 % Zinsen auf deine Restmünzen nach dem Eintreiber (max. 60).",
+                   desc="+15 % Zinsen auf deine Restmünzen nach dem Eintreiber (gedeckelt, steigt mit der Runde).",
                    fx=dict(interest=0.15))),
     ("hat", dict(emoji="🎩", name="Zauberhut", rarity="rare", price=29, max=3,
                  desc="Joker ✨ erscheinen auf den Walzen und ersetzen jedes Symbol.",
                  fx=dict(weight={"wild": 6}))),
-    ("ward", dict(emoji="🧿", name="Pechbann", rarity="common", price=19, max=3,
-                  desc="Weniger 💀 und 30 % weniger Strafe bei Pechlinien.",
-                  fx=dict(weight={"skull": -3}, skull_pen=0.7))),
-    ("angel", dict(emoji="😇", name="Schutzengel", rarity="epic", price=42, max=3,
-                   desc="Sofort +1 Leben.",
-                   fx=dict(lives=1))),
     ("streak", dict(emoji="🔥", name="Heißer Lauf", rarity="rare", price=26, max=3,
                     desc="+15 % auf alle Gewinne für jeden Gewinn-Dreh in Folge (max. +90 %).",
                     fx=dict(streak=0.15))),
+    ("hunter", dict(emoji="🎯", name="Potjäger", rarity="rare", price=24, max=3,
+                    desc="Jackpot-Treffer zahlen +50 % mehr aus dem Topf.",
+                    fx=dict(pot=1.5))),
+    ("map", dict(emoji="🗺️", name="Schatzkarte", rarity="rare", price=25, max=3,
+                 desc="💎 und 7️⃣ erscheinen öfter, 💎 zahlen ×1,2.",
+                 fx=dict(weight={"diamond": 2, "seven": 1}, mult={"diamond": 1.2}))),
+    ("fiver", dict(emoji="🃏", name="Fünferpack", rarity="rare", price=27, max=3,
+                   desc="5er-Linien zahlen ×2.",
+                   fx=dict(lenmult={5: 2.0}))),
+    ("early", dict(emoji="⚡", name="Kaltstart", rarity="rare", price=23, max=3,
+                   desc="Der erste Dreh jeder Runde zahlt ×2.",
+                   fx=dict(first=2.0))),
+    ("finale", dict(emoji="🌙", name="Finale", rarity="rare", price=25, max=3,
+                    desc="Der letzte Dreh jeder Runde zahlt ×2,5.",
+                    fx=dict(last=2.5))),
+    # ---- Episch
+    ("angel", dict(emoji="😇", name="Schutzengel", rarity="epic", price=42, max=3, sell=False,
+                   desc="Sofort +1 Leben. (Nicht verkaufbar.)",
+                   fx=dict(lives=1))),
     ("glove", dict(emoji="🧤", name="Goldene Hand", rarity="epic", price=37, max=3,
-                   desc="Alle Linien-Gewinne ×1,25.",
+                   desc="Alle Gewinne ×1,25.",
                    fx=dict(line=1.25))),
     ("shark", dict(emoji="🦈", name="Schuldenstreicher", rarity="epic", price=34, max=3,
                    desc="Der Eintreiber will 12 % weniger.",
                    fx=dict(debt=0.88))),
-    ("grip", dict(emoji="✋", name="Haltegriff", rarity="common", price=19, max=3,
-                  desc="+1 Walze halten pro Runde.",
-                  fx=dict(holds=1))),
-    ("dice", dict(emoji="🎲", name="Falschspieler", rarity="common", price=21, max=3,
-                  desc="+1 Risiko-Versuch pro Runde und bessere Chancen (+5 %).",
-                  fx=dict(gambles=1, gamble_odds=0.05))),
-    ("hunter", dict(emoji="🎯", name="Potjäger", rarity="rare", price=24, max=3,
-                    desc="Jackpot-Treffer zahlen +50 % mehr aus dem Topf.",
-                    fx=dict(pot=1.5))),
+    ("cat", dict(emoji="🐈‍⬛", name="Katzenleben", rarity="epic", price=40, max=2,
+                 desc="35 % Chance, beim Eintreiber trotz Pleite kein Leben zu verlieren.",
+                 fx=dict(save=0.35))),
+    ("grave", dict(emoji="⚰️", name="Totengräber", rarity="epic", price=38, max=2,
+                   desc="Pechlinien 💀 zahlen dir das Doppelte ihrer Strafe aus, statt Münzen zu kosten.",
+                   fx=dict(skull_pay=2))),
+    # ---- Legendär (erst ab Runde 4 im Shop)
+    ("crown", dict(emoji="👑", name="Midas-Krone", rarity="legendary", price=70, max=2,
+                   desc="Alle Gewinne ×1,4 und +6 Münzen pro Dreh.",
+                   fx=dict(line=1.4, flat=6))),
+    ("pact", dict(emoji="😈", name="Teufelspakt", rarity="legendary", price=55, max=2,
+                  desc="Alle Gewinne ×2 – aber der Eintreiber will 20 % mehr.",
+                  fx=dict(line=2.0, debt=1.2))),
+    ("hourglass", dict(emoji="⏳", name="Zeitkristall", rarity="legendary", price=75, max=2,
+                       desc="+2 Dreh pro Runde.",
+                       fx=dict(spins=2))),
+    ("star", dict(emoji="🌟", name="Sternschnuppe", rarity="legendary", price=60, max=2,
+                  desc="Joker ✨ erscheinen öfter und Jackpots zahlen doppelt.",
+                  fx=dict(weight={"wild": 4}, pot=2.0))),
 ])
-RARITY_WEIGHT = {"common": 10, "rare": 6, "epic": 2.5}
+RARITY_ORDER = ("common", "rare", "epic", "legendary")
+
+
+def rarity_weights(round_no):
+    """Je später die Runde, desto öfter tauchen starke Glücksbringer auf."""
+    r = max(0, round_no)
+    return {"common": 10.0, "rare": 6.0 + 0.45 * r, "epic": 2.5 + 0.4 * r,
+            "legendary": (1.0 + 0.35 * (r - LEGENDARY_FROM)) if r >= LEGENDARY_FROM else 0.0}
+
 
 SABOTAGE = OrderedDict([
     ("thief", dict(emoji="🧲", name="Taschendieb", price=24, target=True,
-                   desc="Klaut einem Gegner sofort 15 Münzen + 15 % seiner Münzen.")),
+                   desc="Klaut einem Gegner sofort Münzen (15 + 15 % seines Vermögens, steigt mit der Runde).")),
     ("frost", dict(emoji="🧊", name="Frostbeule", price=29, target=True,
                    desc="Der Gegner hat nächste Runde 1 Dreh weniger.")),
     ("curse", dict(emoji="🕷️", name="Pechfluch", price=21, target=True,
                    desc="Beim Gegner erscheinen nächste Runde 2,5× so viele 💀.")),
+    ("tax", dict(emoji="📜", name="Steuerprüfer", price=27, target=True,
+                 desc="Der Eintreiber will vom Gegner nächste Runde 20 % mehr.")),
+    ("chain", dict(emoji="⛓️", name="Kettenschloss", price=20, target=True,
+                   desc="Der Gegner kann nächste Runde keine Walzen halten.")),
     ("mirror", dict(emoji="🪞", name="Zauberspiegel", price=26, target=False,
                     desc="Schützt dich: Der nächste Angriff trifft den Angreifer.")),
+    ("bribe", dict(emoji="🤝", name="Bestechung", price=30, target=False,
+                   desc="Der Eintreiber will nächste Runde 25 % weniger von dir.")),
+])
+
+# Ereignisse: jede EVENT_EVERY-te Runde für alle am Tisch (werden im Shop davor angekündigt)
+EVENTS = OrderedDict([
+    ("gold", dict(emoji="💰", name="Goldrausch", desc="Alle Gewinne ×1,5.", fx=dict(line=1.5))),
+    ("plague", dict(emoji="🦠", name="Pestnacht", desc="Viel mehr 💀 auf den Walzen.", fx=dict(weight={"skull": 8}))),
+    ("bonus", dict(emoji="🎁", name="Spendierlaune", desc="+2 Dreh für alle.", fx=dict(spins=2))),
+    ("drought", dict(emoji="🌵", name="Flaute", desc="−1 Dreh, dafür Gewinne ×1,3.", fx=dict(spins=-1, line=1.3))),
+    ("jokers", dict(emoji="🎭", name="Maskenball", desc="Joker ✨ tauchen bei allen auf.", fx=dict(weight={"wild": 6}))),
+    ("mercy", dict(emoji="🕊️", name="Gnadenfrist", desc="Der Eintreiber will 25 % weniger.", fx=dict(debt=0.75))),
+    ("greed", dict(emoji="💸", name="Gier", desc="Eintreiber will 25 % mehr – aber Gewinne ×1,6.", fx=dict(debt=1.25, line=1.6))),
 ])
 
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -253,12 +342,22 @@ def reset_state(data_file=None):
 # Slot-Logik (reine Funktionen)
 # --------------------------------------------------------------------------- #
 
-def compute_mods(charms):
-    m = dict(mult={s: 1.0 for s in SYMBOLS}, weight={s: 0 for s in SYMBOLS}, line=1.0, spins=0,
-             holds=0, gambles=0, flat=0, interest=0.0, skull_pen=1.0, debt=1.0, streak=0.0,
-             gamble_odds=0.0, pot=1.0)
-    for cid, n in charms.items():
-        fx = CHARMS[cid]["fx"]
+MUL_KEYS = ("line", "skull_pen", "debt", "pot", "first", "last", "discount", "guard")
+ADD_KEYS = ("spins", "holds", "gambles", "flat", "interest", "streak", "gamble_odds", "consolation",
+            "interest_cap", "save", "skull_pay")
+
+
+def compute_mods(charms, extra=None):
+    """Summe aller Effekte aus Glücksbringern (n Stapel) plus optionalen Zusatz-Effekten (Ereignis)."""
+    m = dict(mult={s: 1.0 for s in SYMBOLS}, weight={s: 0 for s in SYMBOLS}, lenmult={3: 1.0, 4: 1.0, 5: 1.0})
+    for k in MUL_KEYS:
+        m[k] = 1.0
+    for k in ADD_KEYS:
+        m[k] = 0
+    sources = [(CHARMS[cid]["fx"], n) for cid, n in charms.items() if cid in CHARMS]
+    for fx in (extra or []):
+        sources.append((fx, 1))
+    for fx, n in sources:
         for k, v in fx.items():
             if k == "mult":
                 for s, x in v.items():
@@ -266,14 +365,23 @@ def compute_mods(charms):
             elif k == "weight":
                 for s, x in v.items():
                     m["weight"][s] += x * n
-            elif k in ("line", "skull_pen", "debt", "pot"):
+            elif k == "lenmult":
+                for ln, x in v.items():
+                    m["lenmult"][int(ln)] *= x ** n
+            elif k in MUL_KEYS:
                 m[k] *= v ** n
-            elif k in ("spins", "holds", "gambles", "flat", "interest", "streak", "gamble_odds"):
+            elif k in ADD_KEYS:
                 m[k] += v * n
     m["debt"] = max(0.5, m["debt"])
     m["skull_pen"] = max(0.2, m["skull_pen"])
     m["gamble_odds"] = min(0.7, m["gamble_odds"])
+    m["discount"] = max(0.6, m["discount"])
+    m["save"] = min(SAVE_CAP, m["save"])
     return m
+
+
+def price_scale(round_no):
+    return PRICE_GROWTH ** max(0, round_no - 1)
 
 
 def debt_for(round_no, mods):
@@ -328,28 +436,35 @@ def eval_line(syms):
     return s, n
 
 
-def evaluate(grid, mods, streak=0):
+def evaluate(grid, mods, streak=0, boost=1.0):
     lines = []
     total = 0.0
     pen = 0
+    factor = boost
+    if mods["streak"] > 0:
+        factor *= 1 + min(0.9, mods["streak"] * streak)
     for li, cells in enumerate(LINES):
         s, n = eval_line([grid[r][c] for r, c in cells])
         if n < 3:
             continue
         if s == "skull":
+            if mods["skull_pay"] > 0:
+                coins = SKULL_PEN[n] * mods["skull_pay"] * mods["line"] * factor
+                total += coins
+                lines.append(dict(line=li, sym="skull", n=n, cells=[list(x) for x in cells[:n]], coins=coins))
+                continue
             p = max(1, round(SKULL_PEN[n] * mods["skull_pen"]))
             pen += p
             lines.append(dict(line=li, sym="skull", n=n, cells=[list(x) for x in cells[:n]], coins=-p))
         else:
-            coins = SYMBOLS[s]["value"] * LINE_MULT[n] * mods["mult"][s] * mods["line"]
+            coins = (SYMBOLS[s]["value"] * LINE_MULT[n] * mods["mult"][s] * mods["line"]
+                     * mods["lenmult"][n] * factor)
             total += coins
             lines.append(dict(line=li, sym=s, n=n, cells=[list(x) for x in cells[:n]], coins=coins))
-    if total > 0 and mods["streak"] > 0:
-        total *= 1 + min(0.9, mods["streak"] * streak)
     win = int(round(total))
     for ln in lines:
         if ln["coins"] > 0:
-            ln["coins"] = int(round(ln["coins"]))
+            ln["coins"] = max(1, int(round(ln["coins"])))
     sevens = sum(1 for row in grid for x in row if x == "seven")
     return dict(lines=lines, win=win, pen=pen, sevens=sevens)
 
@@ -386,6 +501,14 @@ class Player:
         self.frost = 0
         self.curse_next = False
         self.cursed = False
+        self.tax_next = 0
+        self.taxed = 0
+        self.chain_next = False
+        self.chained = False
+        self.bribe_next = 0
+        self.bribed = 0
+        self.spin_no = 0
+        self.saves = 0
         self.grid = None
         self.last = None
         self.spin_id = 0
@@ -424,6 +547,8 @@ class Lobby:
         self.final = None
         self.starter = False
         self.multi = False
+        self.event = None          # Ereignis der laufenden Runde
+        self.next_event = None     # im Shop angekündigtes Ereignis der nächsten Runde
         self.created = time.time()
 
     # -- Helfer -------------------------------------------------------------- #
@@ -444,6 +569,44 @@ class Lobby:
         if not p:
             raise GameError("Du sitzt nicht an diesem Tisch.", 403)
         return p
+
+    # -- Skalierung & Effekte -------------------------------------------------- #
+    def mods_of(self, p, next_round=False):
+        ev = self.next_event if next_round else self.event
+        return compute_mods(p.charms, [EVENTS[ev]["fx"]] if ev else None)
+
+    def due_of(self, p, round_no, mods, taxed=0, bribed=0):
+        due = debt_for(round_no, mods) * (1.2 ** taxed) * (0.75 ** bribed)
+        return max(1, int(math.ceil(due)))
+
+    def scale(self):
+        return price_scale(self.round)
+
+    def charm_price(self, p, cid):
+        if self.starter:
+            return 0
+        c = CHARMS[cid]
+        base = c["price"] * (1 + STACK_GROWTH * p.charms.get(cid, 0)) * self.scale() * p.mods()["discount"]
+        return max(1, int(round(base)))
+
+    def sabo_price(self, p, sid):
+        return max(1, int(round(SABOTAGE[sid]["price"] * self.scale() * p.mods()["discount"])))
+
+    def reroll_cost(self, p):
+        return max(1, int(round(REROLL_BASE * (1 + p.rerolls) * self.scale() * p.mods()["discount"])))
+
+    def sell_value(self, p, cid):
+        n = p.charms.get(cid, 0)
+        if n <= 0 or not CHARMS[cid].get("sell", True):
+            return 0
+        val = CHARMS[cid]["price"] * (1 + STACK_GROWTH * (n - 1)) * self.scale() * SELL_RATE
+        return max(1, int(val))
+
+    def event_view(self, ev):
+        if not ev:
+            return None
+        e = EVENTS[ev]
+        return dict(id=ev, emoji=e["emoji"], name=e["name"], desc=e["desc"])
 
     # -- Beitritt ------------------------------------------------------------ #
     def add_player(self, key, name):
@@ -490,13 +653,21 @@ class Lobby:
         self.pot = POT_START
         self.result = None
         self.final = None
+        self.event = None
+        self.next_event = None
         self.log("info", "Die Grube öffnet! %d Runden – möge das Glück mit euch sein." % self.max_rounds)
         self.begin_shop(starter=True)
 
     # -- Shop ---------------------------------------------------------------- #
+    def offer_count(self):
+        if self.starter:
+            return 3
+        return 5 if self.round >= EXTRA_OFFER_FROM else 4
+
     def gen_offers(self, p, n=4):
-        pool = [cid for cid, c in CHARMS.items() if p.charms.get(cid, 0) < c["max"]]
-        ws = [RARITY_WEIGHT[CHARMS[c]["rarity"]] for c in pool]
+        rw = rarity_weights(self.round)
+        pool = [cid for cid, c in CHARMS.items() if p.charms.get(cid, 0) < c["max"] and rw[c["rarity"]] > 0]
+        ws = [rw[CHARMS[c]["rarity"]] for c in pool]
         out = []
         while pool and len(out) < n:
             cid = RNG.choices(pool, ws)[0]
@@ -506,27 +677,31 @@ class Lobby:
             out.append(cid)
         return out
 
-    def charm_price(self, p, cid):
-        if self.starter:
-            return 0
-        base = CHARMS[cid]["price"] * (1 + 0.35 * p.charms.get(cid, 0)) * (1 + 0.08 * max(0, self.round - 1))
-        return max(1, int(round(base)))
-
     def begin_shop(self, starter=False):
         self.phase = "shop"
         self.starter = starter
         self.result = None
         now = time.time()
         self.deadline = now + (STARTER_SECONDS if starter else SHOP_SECONDS)
+        upcoming = self.round + 1
+        self.next_event = None
+        if upcoming % EVENT_EVERY == 0 and upcoming <= self.max_rounds:
+            self.next_event = RNG.choice(list(EVENTS))
         for p in self.players.values():
             p.ready = not p.alive
             p.rerolls = 0
             p.sabos_used = 0
-            p.offers = self.gen_offers(p, 3 if starter else 4) if p.alive else []
+            p.offers = self.gen_offers(p, self.offer_count()) if p.alive else []
         if starter:
             self.log("info", "Wähle deinen Start-Glücksbringer – gratis!")
         else:
-            self.log("info", "Der Shop ist offen. Kauft Glücksbringer – oder macht den anderen das Leben schwer.")
+            self.log("info", "Der Shop ist offen – Preisniveau ×%s. Kauft Glücksbringer oder macht den anderen das Leben schwer."
+                     % ("%.2f" % self.scale()).replace(".", ","))
+        if self.round == LEGENDARY_FROM:
+            self.log("info", "👑 Ab jetzt tauchen legendäre Glücksbringer im Shop auf!")
+        if self.next_event:
+            e = EVENTS[self.next_event]
+            self.log("event", "%s Nächste Runde: %s – %s" % (e["emoji"], e["name"], e["desc"]))
 
     def buy_charm(self, p, cid):
         if self.phase != "shop" or not p.alive:
@@ -551,13 +726,29 @@ class Lobby:
     def reroll(self, p):
         if self.phase != "shop" or not p.alive or self.starter:
             raise GameError("Neu mischen geht jetzt nicht.")
-        cost = 6 + 6 * p.rerolls
+        cost = self.reroll_cost(p)
         if p.coins < cost:
             raise GameError("Neu mischen kostet %d Münzen." % cost)
         p.coins -= cost
         p.rerolls += 1
-        p.offers = self.gen_offers(p, 4)
+        p.offers = self.gen_offers(p, self.offer_count())
         self.touch()
+
+    def sell_charm(self, p, cid):
+        if self.phase != "shop" or not p.alive or self.starter:
+            raise GameError("Verkaufen geht nur im Schwarzmarkt.")
+        if p.charms.get(cid, 0) <= 0:
+            raise GameError("Diesen Glücksbringer hast du nicht.")
+        if not CHARMS[cid].get("sell", True):
+            raise GameError("Diesen Glücksbringer kannst du nicht verkaufen.")
+        value = self.sell_value(p, cid)
+        p.charms[cid] -= 1
+        if p.charms[cid] <= 0:
+            del p.charms[cid]
+        p.coins += value
+        c = CHARMS[cid]
+        self.log("sell", "%s verkauft %s %s für %d Münzen." % (p.name, c["emoji"], c["name"], value), p.name, value)
+        return value
 
     def buy_sabotage(self, p, sid, target_key):
         if self.phase != "shop" or not p.alive or self.starter:
@@ -567,18 +758,25 @@ class Lobby:
             raise GameError("Unbekanntes Item.")
         if p.sabos_used >= MAX_SABOTAGES:
             raise GameError("Maximal %d Items pro Shop-Phase." % MAX_SABOTAGES)
-        if p.coins < item["price"]:
-            raise GameError("Dafür fehlen dir %d Münzen." % (item["price"] - p.coins))
+        price = self.sabo_price(p, sid)
+        if p.coins < price:
+            raise GameError("Dafür fehlen dir %d Münzen." % (price - p.coins))
+        if sid == "bribe" and p.bribe_next >= 2:
+            raise GameError("Mehr als zweimal lässt sich der Eintreiber nicht bestechen.")
         dst = None
         if item["target"]:
             dst = self.players.get(target_key)
             if not dst or not dst.alive or dst.key == p.key:
                 raise GameError("Such dir einen lebenden Gegner aus.")
-        p.coins -= item["price"]
+        p.coins -= price
         p.sabos_used += 1
         if sid == "mirror":
             p.mirrors += 1
             self.log("buy", "%s stellt einen Zauberspiegel auf. 🪞" % p.name, p.name)
+            return
+        if sid == "bribe":
+            p.bribe_next += 1
+            self.log("buy", "🤝 %s steckt dem Eintreiber etwas zu …" % p.name, p.name)
             return
         if dst.mirrors > 0:
             dst.mirrors -= 1
@@ -590,7 +788,7 @@ class Lobby:
     def apply_sabotage(self, sid, src, dst):
         item = SABOTAGE[sid]
         if sid == "thief":
-            amt = min(dst.coins, 15 + int(dst.coins * 0.15))
+            amt = min(dst.coins, int((15 * self.scale() + dst.coins * 0.15) * dst.mods()["guard"]))
             dst.coins -= amt
             src.coins += amt
             self.log("steal", "%s %s bestiehlt %s um %d Münzen!" % (item["emoji"], src.name, dst.name, amt), src.name, amt)
@@ -600,6 +798,12 @@ class Lobby:
         elif sid == "curse":
             dst.curse_next = True
             self.log("curse", "%s %s verflucht %s: Totenköpfe regnen." % (item["emoji"], src.name, dst.name), src.name)
+        elif sid == "tax":
+            dst.tax_next += 1
+            self.log("curse", "%s %s hetzt %s den Steuerprüfer auf den Hals: +20 %% Schulden." % (item["emoji"], src.name, dst.name), src.name)
+        elif sid == "chain":
+            dst.chain_next = True
+            self.log("frost", "%s %s legt %s in Ketten: nächste Runde kein Halten." % (item["emoji"], src.name, dst.name), src.name)
 
     def set_ready(self, p):
         if self.phase != "shop" or not p.alive:
@@ -624,26 +828,42 @@ class Lobby:
         self.phase = "spin"
         self.starter = False
         self.grace_at = None
+        self.event = self.next_event
+        self.next_event = None
         most = 1
         for p in self.players.values():
             if not p.alive:
                 continue
-            m = p.mods()
+            m = self.mods_of(p)
             p.spins_left = max(1, min(MAX_SPINS, BASE_SPINS + m["spins"]) - p.frost)
             p.frost = 0
-            p.holds_left = BASE_HOLDS + m["holds"]
+            p.chained = p.chain_next
+            p.chain_next = False
+            p.holds_left = 0 if p.chained else BASE_HOLDS + m["holds"]
             p.gambles_left = BASE_GAMBLES + m["gambles"]
             p.gamble_pending = 0
             p.streak = 0
+            p.spin_no = 0
             p.done = False
             p.cursed = p.curse_next
             p.curse_next = False
+            p.taxed = p.tax_next
+            p.tax_next = 0
+            p.bribed = p.bribe_next
+            p.bribe_next = 0
             most = max(most, p.spins_left)
             if p.grid is None:
                 p.grid = random_grid(symbol_weights(m, self.round))
         self.deadline = time.time() + SPIN_BASE_SECONDS + SPIN_PER_SPIN_SECONDS * most
         self.log("info", "Runde %d von %d – der Eintreiber will %d Münzen." % (
-            self.round, self.max_rounds, debt_for(self.round, compute_mods({}))))
+            self.round, self.max_rounds, debt_for(self.round, compute_mods({}, self.event_fx()))))
+        if self.event:
+            e = EVENTS[self.event]
+            self.log("event", "%s EREIGNIS: %s – %s" % (e["emoji"], e["name"], e["desc"]))
+
+    def event_fx(self, next_round=False):
+        ev = self.next_event if next_round else self.event
+        return [EVENTS[ev]["fx"]] if ev else None
 
     def spin(self, p, holds=None, auto=False):
         if self.phase != "spin" or not p.alive:
@@ -658,7 +878,7 @@ class Lobby:
             raise GameError("Du hast nur noch %d Halten übrig." % p.holds_left)
         if len(holds) >= REELS:
             raise GameError("Du kannst nicht alle Walzen halten.")
-        m = p.mods()
+        m = self.mods_of(p)
         w = symbol_weights(m, self.round, p.cursed)
         new = random_grid(w)
         for h in holds:
@@ -666,19 +886,25 @@ class Lobby:
                 new[r][h] = p.grid[r][h]
         p.holds_left -= len(holds)
         p.grid = new
+        boost = 1.0
+        if p.spin_no == 0:
+            boost *= m["first"]
+        if p.spins_left == 1:
+            boost *= m["last"]
         p.spins_left -= 1
+        p.spin_no += 1
         p.spin_id += 1
-        res = evaluate(new, m, p.streak)
+        res = evaluate(new, m, p.streak, boost)
         line_win = res["win"]
-        flat = m["flat"]
+        flat = int(m["flat"]) + (int(m["consolation"]) if line_win == 0 else 0)
         net = line_win + flat - res["pen"]
         p.streak = p.streak + 1 if line_win > 0 else 0
         jackpot = 0
         if res["sevens"] >= 3:
             jackpot = int(self.pot * m["pot"])
-            self.pot = POT_START
+            self.pot = int(POT_START * self.scale())
         else:
-            self.pot += POT_PER_SPIN
+            self.pot += int(round(POT_PER_SPIN * self.scale()))
         gain = net + jackpot
         before = p.coins
         p.coins = max(0, p.coins + gain)
@@ -689,7 +915,8 @@ class Lobby:
             p.jackpots += 1
         p.gamble_pending = net if (net > 0 and p.gambles_left > 0) else 0
         p.last = dict(id=p.spin_id, grid=new, lines=res["lines"], win=line_win, flat=flat, pen=res["pen"],
-                      jackpot=jackpot, net=net, sevens=res["sevens"], streak=p.streak, auto=auto, holds=holds)
+                      jackpot=jackpot, net=net, sevens=res["sevens"], streak=p.streak, auto=auto, holds=holds,
+                      boost=round(boost, 2))
         total = net + jackpot
         if jackpot:
             self.log("jackpot", "🎰 JACKPOT! %s knackt den Topf: +%d Münzen!" % (p.name, jackpot), p.name, jackpot)
@@ -710,7 +937,7 @@ class Lobby:
             raise GameError("Es gibt nichts zu verdoppeln.")
         stake = p.gamble_pending
         p.gambles_left -= 1
-        odds = GAMBLE_BASE_ODDS + p.mods()["gamble_odds"]
+        odds = GAMBLE_BASE_ODDS + self.mods_of(p)["gamble_odds"]
         won = RNG.random() < odds
         if won:
             p.coins += stake
@@ -740,18 +967,26 @@ class Lobby:
         for p in self.players.values():
             if not p.alive:
                 continue
-            m = p.mods()
-            due = debt_for(self.round, m)
+            m = self.mods_of(p)
+            due = self.due_of(p, self.round, m, p.taxed, p.bribed)
             if p.coins >= due:
                 p.coins -= due
                 bonus = 0
                 if m["interest"] > 0:
-                    bonus = min(60, int(p.coins * m["interest"]))
+                    cap = int(INTEREST_CAP * self.scale()) + int(m["interest_cap"])
+                    bonus = min(cap, int(p.coins * m["interest"]))
                     p.coins += bonus
                 p.rounds_survived += 1
                 rows.append(dict(name=p.name, key=p.key, due=due, paid=True, bonus=bonus, coins=p.coins,
                                  lives=p.lives, out=False))
                 self.log("paid", "✅ %s zahlt %d Münzen." % (p.name, due), p.name, due)
+            elif m["save"] > 0 and RNG.random() < m["save"]:
+                lost = p.coins
+                p.coins = PITY_COINS
+                p.saves += 1
+                rows.append(dict(name=p.name, key=p.key, due=due, paid=False, saved=True, bonus=0, coins=p.coins,
+                                 lives=p.lives, out=False, lost=lost))
+                self.log("paid", "🐈‍⬛ %s kann nicht zahlen – entwischt dem Eintreiber aber mit einem Katzenleben!" % p.name, p.name)
             else:
                 p.lives -= 1
                 lost = p.coins
@@ -765,7 +1000,7 @@ class Lobby:
                                  lives=max(0, p.lives), out=out, lost=lost))
                 self.log("fail", ("☠️ %s kann nicht zahlen und scheidet aus!" if out
                                   else "💔 %s kann nicht zahlen und verliert ein Leben!") % p.name, p.name, due)
-        self.result = dict(round=self.round, due=debt_for(self.round, compute_mods({})), rows=rows)
+        self.result = dict(round=self.round, due=debt_for(self.round, compute_mods({}, self.event_fx())), rows=rows)
         self.touch()
 
     def after_collect(self):
@@ -825,6 +1060,8 @@ class Lobby:
         self.final = None
         self.result = None
         self.pot = POT_START
+        self.event = None
+        self.next_event = None
         for k in [k for k, p in self.players.items() if p.quit]:
             del self.players[k]
             PLAYER_LOBBY.pop(k, None)
@@ -942,6 +1179,9 @@ def catalog():
         lines=LINES,
         charms=[dict(id=c, **{k: v for k, v in d.items() if k != "fx"}) for c, d in CHARMS.items()],
         sabotage=[dict(id=s, **d) for s, d in SABOTAGE.items()],
+        events=[dict(id=e, **{k: v for k, v in d.items() if k != "fx"}) for e, d in EVENTS.items()],
+        rarities=list(RARITY_ORDER), legendary_from=LEGENDARY_FROM, event_every=EVENT_EVERY,
+        price_growth=PRICE_GROWTH,
         emotes=list(EMOTES),
         rounds=list(ROUND_CHOICES),
         reels=REELS, rows=ROWS, max_players=MAX_PLAYERS,
@@ -951,15 +1191,16 @@ def catalog():
 
 
 def player_view(lobby, p, now, me=False):
-    m = p.mods()
+    m = lobby.mods_of(p)
     d = dict(
         key=p.key, name=p.name, coins=p.coins, lives=p.lives, alive=p.alive, quit=p.quit,
         charms=p.charms, grid=p.grid, last=p.last, spins_left=p.spins_left, ready=p.ready,
         done=p.done, streak=p.streak, host=(p.key == lobby.host), online=(now - p.seen) < 12,
-        due=debt_for(max(1, lobby.round), m), earned=p.total_earned,
+        due=lobby.due_of(p, max(1, lobby.round), m, p.taxed, p.bribed), earned=p.total_earned,
         emote=(p.emote if now - p.emote_at < 4 else None), emote_at=p.emote_at, mirrors=p.mirrors,
         level=level_of(DB["players"].get(p.key, {}).get("ruhm", 0)),
-        cursed=p.cursed, out_round=p.out_round,
+        cursed=p.cursed, out_round=p.out_round, chained=p.chained, taxed=p.taxed,
+        marked=dict(frost=p.frost, curse=p.curse_next, tax=p.tax_next, chain=p.chain_next),
     )
     if me:
         w = symbol_weights(m, max(1, lobby.round), p.cursed)
@@ -968,10 +1209,13 @@ def player_view(lobby, p, now, me=False):
             holds_left=p.holds_left, gambles_left=p.gambles_left, gamble_pending=p.gamble_pending,
             gamble_odds=GAMBLE_BASE_ODDS + m["gamble_odds"],
             offers=[dict(id=c, price=lobby.charm_price(p, c)) for c in p.offers],
-            reroll_cost=6 + 6 * p.rerolls, sabos_left=MAX_SABOTAGES - p.sabos_used,
+            reroll_cost=lobby.reroll_cost(p), sabos_left=MAX_SABOTAGES - p.sabos_used,
+            sabo_prices={s: lobby.sabo_price(p, s) for s in SABOTAGE},
+            sell_values={c: lobby.sell_value(p, c) for c in p.charms},
             odds={s: round(100 * x / tot, 1) for s, x in w.items() if x > 0},
             mult={s: round(x, 2) for s, x in m["mult"].items() if abs(x - 1) > 1e-9},
-            due_next=debt_for(lobby.round + 1, m),
+            due_next=lobby.due_of(p, lobby.round + 1, lobby.mods_of(p, next_round=True), p.tax_next, p.bribe_next),
+            bribe_next=p.bribe_next, bribed=p.bribed, saves=p.saves,
             flat=m["flat"], interest=m["interest"], spins_total=min(MAX_SPINS, BASE_SPINS + m["spins"]),
             streak_bonus=m["streak"], frost=p.frost, curse_next=p.curse_next,
         )
@@ -988,7 +1232,9 @@ def lobby_view(lobby, key):
         host=lobby.host, you=key, pot=lobby.pot, v=lobby.v, starter=lobby.starter,
         deadline_in=(max(0.0, lobby.deadline - now) if lobby.deadline else None),
         grace=(lobby.grace_at is not None and lobby.phase == "spin"),
-        due_base=debt_for(max(1, lobby.round), compute_mods({})),
+        due_base=debt_for(max(1, lobby.round), compute_mods({}, lobby.event_fx())),
+        event=lobby.event_view(lobby.event), next_event=lobby.event_view(lobby.next_event),
+        price_scale=round(lobby.scale(), 2), offer_rarity=rarity_weights(lobby.round),
         multi=lobby.multi,
         players=[player_view(lobby, p, now) for p in lobby.players.values()],
         me=(player_view(lobby, me, now, me=True) if me else None),
@@ -1331,6 +1577,15 @@ def lobby_buy(code):
         lobby = lobby_of(code, g.key)
         lobby.buy_charm(lobby.get(g.key), str(body().get("id")))
         lobby.tick(time.time())
+        return state_response(lobby, g.key)
+
+
+@app.route("/api/lobby/<code>/sell", methods=["POST"])
+@auth
+def lobby_sell(code):
+    with LOCK:
+        lobby = lobby_of(code, g.key)
+        lobby.sell_charm(lobby.get(g.key), str(body().get("id")))
         return state_response(lobby, g.key)
 
 
