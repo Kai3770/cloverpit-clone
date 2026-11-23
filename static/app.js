@@ -133,7 +133,10 @@
   const emoji = (id) => (SYM[id] ? SYM[id].emoji : "?");
   const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const avatar = (name, size) => el("div", { class: "avatar", style: { background: "hsl(" + hue(name) + " 85% 65%)", width: (size || 40) + "px", height: (size || 40) + "px" } }, (name || "?")[0].toUpperCase());
-  const RAR = { common: "Gewöhnlich", rare: "Selten", epic: "Episch" };
+  const RAR = { common: "Gewöhnlich", rare: "Selten", epic: "Episch", legendary: "Legendär" };
+  const pct = (x) => String(Math.round(x * 100) / 100).replace(".", ",");
+  const eventBox = (ev, label) => ev && el("div", { class: "event-box" }, el("span", { class: "ev-ico" }, ev.emoji),
+    el("div", null, el("small", null, label), el("b", null, ev.name), el("span", null, ev.desc)));
 
   /* ---------- Ansichten ---------- */
   const VIEWS = ["auth", "menu", "room", "game"];
@@ -304,7 +307,19 @@
           el("li", null, el("b", null, "Halten 🔒:"), " Tippe vor dem Dreh auf eine Walze, um sie zu behalten."),
           el("li", null, el("b", null, "Risiko 🎲:"), " Nach einem Gewinn kannst du ihn mit ~45 % Chance verdoppeln – oder verlieren."),
           el("li", null, el("b", null, "Jackpot 🎰:"), " 3 oder mehr 7️⃣ irgendwo auf dem Feld knacken den gemeinsamen Topf."),
-          el("li", null, el("b", null, "Sabotage:"), " Taschendieb 🧲, Frostbeule 🧊, Pechfluch 🕷️ – oder schütze dich mit dem Zauberspiegel 🪞."),
+          el("li", null, el("b", null, "Sabotage:"), " " + cat.sabotage.filter((x) => x.target).map((x) => x.name + " " + x.emoji).join(", ") + " – oder hilf dir selbst: " + cat.sabotage.filter((x) => !x.target).map((x) => x.name + " " + x.emoji).join(", ") + "."),
+          el("li", null, el("b", null, "Verkaufen:"), " Im Schwarzmarkt kannst du Glücksbringer für 40 % des aktuellen Preises zurückgeben.")),
+        el("h4", null, "SKALIERUNG"),
+        el("ul", null,
+          el("li", null, "Alle Preise im Schwarzmarkt steigen jede Runde um " + Math.round((cat.price_growth - 1) * 100) + " % – und jede weitere Kopie desselben Glücksbringers kostet zusätzlich mehr."),
+          el("li", null, "Später tauchen seltene und epische Glücksbringer häufiger auf, ab Runde " + cat.legendary_from + " auch ", el("b", null, "legendäre 👑"), ". Ab Runde 6 gibt es 5 Angebote."),
+          el("li", null, "Der Jackpot-Topf und die Beute des Taschendiebs wachsen mit.")),
+        el("h4", null, "EREIGNISSE (jede " + cat.event_every + ". Runde)"),
+        el("ul", null, cat.events.map((e) => el("li", null, e.emoji + " ", el("b", null, e.name), ": " + e.desc))),
+        el("h4", null, "ALLE GLÜCKSBRINGER (" + cat.charms.length + ")"),
+        el("div", { class: "charm-list" }, cat.rarities.map((r) => el("div", null, el("small", { class: "rar-" + r }, RAR[r].toUpperCase()),
+          el("ul", null, cat.charms.filter((c) => c.rarity === r).map((c) => el("li", null, c.emoji + " ", el("b", null, c.name), " – " + c.desc)))))),
+        el("ul", null,
           el("li", null, "Emojis unten schicken Grüße (und Gemeinheiten) an den Tisch.")));
     });
   }
@@ -581,7 +596,7 @@
     if (last.jackpot > 0) { text = "JACKPOT!"; level = 3; sfx.jackpot(); fx.confetti(4); M.machine.classList.add("mega"); feedback("flash-gold"); }
     else if (total >= cat.mega_win) { text = "MEGA WIN"; level = 3; sfx.win(3); fx.confetti(3); M.machine.classList.add("mega"); feedback("flash-gold"); }
     else if (total >= cat.big_win) { text = "BIG WIN"; level = 2; sfx.win(2); fx.confetti(1); }
-    else if (total > 0) { text = "+" + fmt(total); level = 1; sfx.win(0); }
+    else if (total > 0) { text = "+" + fmt(total) + (last.boost > 1 && last.win > 0 ? " (×" + pct(last.boost) + ")" : ""); level = 1; sfx.win(0); }
     if (last.pen > 0 && total <= 0) { text = "−" + last.pen; bad = true; sfx.skull(); feedback("flash-red"); }
     setTimeout(() => M.machine.classList.remove("mega"), 3200);
     if (total > 0) { const r = M.machine.getBoundingClientRect(); fx.coins(r.left + r.width / 2, r.top + r.height / 2, Math.min(40, 8 + level * 10)); }
@@ -631,7 +646,8 @@
     const label = st.phase === "spin" || st.phase === "collect" ? "Eintreiber fordert" : "Nächste Forderung";
     const due = st.phase === "shop" ? me.due_next : me.due;
     M.hud.replaceChildren(
-      el("div", { class: "round-tag" }, "RUNDE " + Math.max(1, st.round) + "/" + st.max_rounds, el("small", null, st.phase === "spin" ? "DREHEN" : st.phase === "shop" ? "SCHWARZMARKT" : st.phase === "collect" ? "EINTREIBER" : "ENDE")),
+      el("div", { class: "round-tag" }, "RUNDE " + Math.max(1, st.round) + "/" + st.max_rounds, el("small", null, st.phase === "spin" ? "DREHEN" : st.phase === "shop" ? "SCHWARZMARKT" : st.phase === "collect" ? "EINTREIBER" : "ENDE"),
+        st.event && st.phase !== "shop" && el("small", { class: "ev-tag", title: st.event.desc }, st.event.emoji + " " + st.event.name)),
       el("div", { class: "debt" }, el("div", { class: "label" }, el("span", null, "🪙 ", el("span", { class: "js-coins" }, fmt(S.dispCoins))), el("em", null, "💀 " + label + " " + fmt(due) + " 🪙")),
         el("div", { class: ["bar", S.dispCoins >= me.due && "ok"] }, el("i", { style: { width: Math.min(100, (S.dispCoins / Math.max(1, me.due)) * 100) + "%" } }))),
       el("div", { class: "hud-right" }, hearts, el("div", { class: "timer js-timer" }, "–")));
@@ -666,7 +682,11 @@
       else if (me.spins_left <= 0 && me.done) c.append(el("p", { class: "hint" }, "Warte auf die anderen …"));
       const bits = [];
       if (me.holds_left > 0) bits.push("Tippe auf Walzen zum Halten 🔒 (" + me.holds_left + " übrig)");
-      if (me.curse_next || me.cursed) bits.push("🕷️ verflucht: mehr 💀!");
+      if (me.cursed) bits.push("🕷️ verflucht: mehr 💀!");
+      if (me.chained) bits.push("⛓️ angekettet: kein Halten");
+      if (me.taxed) bits.push("📜 Steuerprüfer: +" + Math.round((Math.pow(1.2, me.taxed) - 1) * 100) + " % Schulden");
+      if (me.bribed) bits.push("🤝 bestochen: −" + Math.round((1 - Math.pow(0.75, me.bribed)) * 100) + " % Schulden");
+      if (st.event) bits.push(st.event.emoji + " " + st.event.name + ": " + st.event.desc);
       if (st.me.streak > 0) bits.push("🔥 Serie " + st.me.streak);
       if (bits.length) c.append(el("p", { class: "hint" }, bits.join(" · ")));
     } else if (st.phase === "collect") {
@@ -698,9 +718,21 @@
     if (S.st) renderControls();
   }
 
-  function inventory(me) {
+  function inventory(me, sellable) {
     const items = Object.entries(me.charms || {});
     if (!items.length) return el("p", { class: "hint" }, "Noch keine Glücksbringer – im Schwarzmarkt gibt's welche.");
+    if (sellable) {
+      return el("div", { class: "inv sellinv" }, items.map(([id, n]) => {
+        const c = CHARM[id], val = (me.sell_values || {})[id] || 0;
+        return el("div", { class: ["sellcard", c.rarity] },
+          el("div", { class: ["charm", c.rarity], title: c.name + " – " + c.desc }, c.emoji, n > 1 && el("b", null, "×" + n)),
+          el("div", { class: "sc-name" }, c.name),
+          val > 0 ? el("button", { class: "btn btn-ghost btn-tiny", type: "button", onclick: async () => {
+            if (!confirm(c.name + " für " + val + " 🪙 verkaufen?")) return;
+            const r = await call("sell", { id }); if (r) { sfx.buy(); toast("+" + val + " 🪙 für " + c.name, "gold"); }
+          } }, "Verkaufen +" + fmt(val)) : el("span", { class: "muted small" }, "unverkäuflich"));
+      }));
+    }
     return el("div", { class: "inv" }, items.map(([id, n]) => {
       const c = CHARM[id];
       return el("div", { class: ["charm", c.rarity], title: c.name + (n > 1 ? " ×" + n : "") + " – " + c.desc }, c.emoji, n > 1 && el("b", null, "×" + n));
@@ -731,7 +763,7 @@
       el("div", { class: ["opp", p.key === st.you && "me", !p.alive && "out"], "data-pk": p.key },
         el("div", { class: "opp-head" }, avatar(p.name, 28), el("span", { class: "nm" }, p.name, p.key === st.you ? " (du)" : ""), el("span", { class: "co" }, fmt(p.coins) + " 🪙")),
         miniGrid(p),
-        el("div", { class: "opp-foot" }, el("span", null, "❤️".repeat(Math.max(0, p.lives)) || "—", p.mirrors > 0 ? " 🪞" : "", p.cursed ? " 🕷️" : ""), el("span", null, status(p))),
+        el("div", { class: "opp-foot" }, el("span", null, "❤️".repeat(Math.max(0, p.lives)) || "—", p.mirrors > 0 ? " 🪞" : "", p.cursed ? " 🕷️" : "", p.chained ? " ⛓️" : "", p.taxed ? " 📜" : ""), el("span", null, status(p))),
         el("div", { class: "opp-foot" }, el("span", { class: "ch" }, Object.entries(p.charms).slice(0, 9).map(([id, n]) => CHARM[id].emoji + (n > 1 ? n : "")).join(" ")))));
     const feed = el("div", { class: "feed" }, [...st.events].reverse().slice(0, 18).map((e) => el("div", { class: e.k }, e.txt)));
     M.side.replaceChildren(
@@ -776,20 +808,28 @@
         el("button", { class: ["btn", st.starter ? "btn-lime" : "btn-gold"], type: "button", disabled: !can, onclick: async () => { const r = await call("buy", { id: o.id }); if (r) { sfx.buy(); fx.coins(innerWidth / 2, innerHeight / 2, 10, c.emoji); } } },
           st.starter ? "Wählen (gratis)" : "Kaufen · " + fmt(o.price) + " 🪙"));
     });
-    const sab = (!st.starter && opp.length > 0) ? S.cat.sabotage.map((s) =>
-      el("div", { class: "sab-card" }, el("h4", null, s.emoji + " " + s.name + " · " + s.price + " 🪙"), el("p", null, s.desc),
-        s.target ? el("div", { class: "row", style: { justifyContent: "flex-start" } }, opp.map((p) => el("button", { class: "btn btn-pink btn-small", type: "button", disabled: me.coins < s.price || me.sabos_left <= 0, onclick: async () => { const r = await call("sabotage", { id: s.id, target: p.key }); if (r) sfx.buy(); } }, "→ " + p.name)))
-          : el("button", { class: "btn btn-cyan btn-small", type: "button", disabled: me.coins < s.price || me.sabos_left <= 0, onclick: async () => { const r = await call("sabotage", { id: s.id }); if (r) sfx.buy(); } }, "Aufstellen" + (me.mirrors ? " (hast " + me.mirrors + ")" : "")))) : [];
+    const sp = (id) => (me.sabo_prices || {})[id] || SABO[id].price;
+    const selfLabel = (s) => s.id === "mirror" ? "Aufstellen" + (me.mirrors ? " (hast " + me.mirrors + ")" : "")
+      : s.id === "bribe" ? "Bestechen" + (me.bribe_next ? " (" + me.bribe_next + "/2)" : "") : "Kaufen";
+    const sabItems = S.cat.sabotage.filter((s) => (s.target || s.id === "mirror") ? opp.length > 0 : true);
+    const sab = !st.starter ? sabItems.map((s) =>
+      el("div", { class: ["sab-card", !s.target && "self"] }, el("h4", null, s.emoji + " " + s.name + " · " + fmt(sp(s.id)) + " 🪙"), el("p", null, s.desc),
+        s.target ? el("div", { class: "row", style: { justifyContent: "flex-start" } }, opp.map((p) => el("button", { class: "btn btn-pink btn-small", type: "button", disabled: me.coins < sp(s.id) || me.sabos_left <= 0, onclick: async () => { const r = await call("sabotage", { id: s.id, target: p.key }); if (r) sfx.buy(); } }, "→ " + p.name)))
+          : el("button", { class: "btn btn-cyan btn-small", type: "button", disabled: me.coins < sp(s.id) || me.sabos_left <= 0 || (s.id === "bribe" && me.bribe_next >= 2), onclick: async () => { const r = await call("sabotage", { id: s.id }); if (r) sfx.buy(); } }, selfLabel(s)))) : [];
     const rdy = st.players.filter((p) => p.alive).map((p) => el("span", { class: ["rdy", p.ready && "on"] }, (p.ready ? "✅ " : "🛒 ") + p.name));
     return el("div", { class: "ov" },
       el("h2", { class: "ov-title" }, st.starter ? "WÄHLE DEIN START-GLÜCKSBRINGER" : "SCHWARZMARKT"),
       el("p", { class: "ov-sub" }, st.starter ? "Einer geht aufs Haus – er prägt deinen ganzen Lauf." : "Runde " + st.round + " überstanden. Der Eintreiber will nächstes Mal " + fmt(me.due_next) + " 🪙."),
-      el("div", { class: "shop-head" }, el("div", { class: "chip" }, "🪙 ", el("b", null, fmt(me.coins))), el("div", { class: "chip" }, "❤️ " + me.lives), el("div", { class: "chip" }, "⏱ ", el("span", { class: "js-timer" }, "–"))),
+      el("div", { class: "shop-head" }, el("div", { class: "chip" }, "🪙 ", el("b", null, fmt(me.coins))), el("div", { class: "chip" }, "❤️ " + me.lives),
+        !st.starter && el("div", { class: ["chip", st.price_scale >= 2 && "hot"], title: "Preise steigen jede Runde um " + Math.round((S.cat.price_growth - 1) * 100) + " %" }, "📈 Preise ×" + pct(st.price_scale)),
+        el("div", { class: "chip" }, "⏱ ", el("span", { class: "js-timer" }, "–"))),
+      !st.starter && eventBox(st.next_event, "NÄCHSTE RUNDE: EREIGNIS"),
+      !st.starter && st.round === S.cat.legendary_from && el("p", { class: "hint legend-hint" }, "👑 Ab jetzt können legendäre Glücksbringer auftauchen!"),
       el("div", { class: "offers" }, offers.length ? offers : el("p", { class: "muted" }, "Keine Angebote mehr.")),
       !st.starter && el("div", { class: "row", style: { marginTop: "12px" } }, el("button", { class: "btn btn-ghost", type: "button", disabled: me.coins < me.reroll_cost, onclick: () => call("reroll") }, "🔄 Neu mischen · " + me.reroll_cost + " 🪙")),
       sab.length > 0 && el("div", { class: "sec-title red" }, "SABOTAGE & SCHUTZ (noch " + me.sabos_left + " diese Runde)"),
       sab.length > 0 && el("div", { class: "sab" }, sab),
-      el("div", { class: "sec-title" }, "DEINE GLÜCKSBRINGER"), inventory(me),
+      el("div", { class: "sec-title" }, "DEINE GLÜCKSBRINGER" + (!st.starter && Object.keys(me.charms || {}).length ? " – VERKAUFEN BRINGT 40 % DES AKTUELLEN PREISES" : "")), inventory(me, !st.starter),
       el("div", { class: "readyrow" },
         el("button", { class: "btn btn-lime", type: "button", disabled: me.ready || (st.starter && !me.ready), onclick: () => call("ready") }, me.ready ? "Warte auf die anderen …" : "Bereit – weiter ➜"), rdy),
       el("div", { class: "row", style: { marginTop: "10px" } }, el("button", { class: "btn btn-ghost btn-small", type: "button", onclick: openHelp }, "Regeln")));
@@ -804,7 +844,7 @@
       el("div", { class: "demand" }, "Runde " + r.round + ": " + fmt(r.due) + " 🪙"),
       el("div", { class: "pay-list" }, r.rows.map((x, i) => el("div", { class: ["pay", x.paid ? "ok" : "no"], style: { animationDelay: (0.5 + i * 0.5) + "s" } },
         avatar(x.name, 34), el("div", null, el("b", null, x.name), el("div", { class: "muted small" }, "zahlt " + fmt(x.due) + " 🪙" + (x.bonus ? " · +" + x.bonus + " Zinsen 🐷" : ""))),
-        el("div", { class: "st stamp" }, x.paid ? "✅ bezahlt" : x.out ? "☠️ ausgeschieden" : "💔 −1 Leben")))),
+        el("div", { class: "st stamp" }, x.paid ? "✅ bezahlt" : x.saved ? "🐈‍⬛ gerettet" : x.out ? "☠️ ausgeschieden" : "💔 −1 Leben")))),
       el("p", { class: "ov-sub", style: { marginTop: "16px" } }, "Weiter in ", el("span", { class: "js-timer" }, "–")));
   }
 
